@@ -1,0 +1,23 @@
+# Copyright (c) 2021 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+manifest:
+  self:
+    path: graywater_box
+
+  remotes:
+    - name: upstream
+      url-base: https://github.com/zephyrproject-rtos
+    - name: retfie
+      url-base: https://github.com/retfie
+
+  projects:
+    - name: zephyr
+      remote: upstream
+      revision: main
+      import:
+        name-allowlist:
+          - hal_stm32
+          - cmsis
+          - tinycrypt
+          - loramac-node
