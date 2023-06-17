@@ -505,7 +505,7 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 	switch (state) {
 	case NOT_JOINED:
 		/* Turn green led on to indicate not joined state */
-		led_enable(&led_green, 0);
+		led_enable(&led_green, 1);
 
 		lorawan_status.joined = false;
 		LOG_INF("Lora join timer start for %d sec", join_try_interval_sec);
@@ -516,7 +516,7 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 
 	case JOINED:
 		/* Turn green led off on join success */
-		led_enable(&led_green, 1);
+		led_enable(&led_green, 0);
 
 		lorawan_status.joined = true;
 		lorawan_status.join_retry_sessions_count = 0;
@@ -721,7 +721,7 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 
 	LOG_INF("Lora send -------------->");
 
-	led_enable(&led_blue, 0);
+	led_enable(&led_blue, 1);
 	err = lorawan_send(lorawan_config.app_port,
 			data_ptr, sizeof(struct s_mapper_data),
 			msg_type);
@@ -737,7 +737,7 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 		lorawan_status.last_pos_send_ok = k_uptime_get();
 		LOG_INF("Data sent!");
 	}
-	led_enable(&led_blue, 1);
+	led_enable(&led_blue, 0);
 
 	/* Remember last send time */
 	lorawan_status.last_pos_send = k_uptime_get();
