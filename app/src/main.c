@@ -752,6 +752,7 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 			delta_sent_ok_sec > inactive_time_window_sec) {
 		LOG_ERR("Too many failed msgs: Try to re-join.");
 		lorawan_state(ctx, NOT_JOINED);
+		k_sem_give(&ctx->lora_join_sem);
 	}
 }
 
