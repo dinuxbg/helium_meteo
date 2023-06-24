@@ -86,6 +86,7 @@ char *data_ptr = (char*)&mapper_data;
 
 #define LORA_JOIN_THREAD_STACK_SIZE 1500
 #define LORA_JOIN_THREAD_PRIORITY 10
+K_KERNEL_STACK_MEMBER(lora_join_thread_stack, LORA_JOIN_THREAD_STACK_SIZE);
 
 struct s_helium_mapper_ctx {
 	const struct device *lora_dev;
@@ -94,7 +95,6 @@ struct s_helium_mapper_ctx {
 	struct k_timer delayed_timer;
 	struct k_timer gps_off_timer;
 	struct k_timer lora_join_timer;
-	K_KERNEL_STACK_MEMBER(thread_stack, LORA_JOIN_THREAD_STACK_SIZE);
 	struct k_thread thread;
 	struct k_sem lora_join_sem;
 	bool gps_fix;
@@ -616,8 +616,8 @@ int init_lora(struct s_helium_mapper_ctx *ctx) {
 
 	k_sem_init(&ctx->lora_join_sem, 0, K_SEM_MAX_LIMIT);
 
-	k_thread_create(&ctx->thread, ctx->thread_stack,
-			LORA_JOIN_THREAD_STACK_SIZE,
+	k_thread_create(&ctx->thread, lora_join_thread_stack,
+			K_THREAD_STACK_SIZEOF(lora_join_thread_stack),
 			(k_thread_entry_t)lora_join_thread, ctx, NULL, NULL,
 			K_PRIO_PREEMPT(LORA_JOIN_THREAD_PRIORITY), 0,
 			K_SECONDS(1));
