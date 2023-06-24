@@ -58,8 +58,6 @@ void hm_lorawan_nvm_save_settings(const char *name)
 			}
 		}
 	}
-
-	settings_save();
 }
 
 static int hm_load_setting(void *tgt, size_t tgt_size,
