@@ -896,4 +896,6 @@ fail:
 		}
 		k_sleep(K_SECONDS(1));
 	}
+
+	return 0;
 }
