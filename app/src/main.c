@@ -504,6 +504,10 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 
 	switch (state) {
 	case NOT_JOINED:
+		if (!lorawan_config.auto_join) {
+			LOG_WRN("Join is not enabled");
+			break;
+		}
 		/* Turn green led on to indicate not joined state */
 		led_enable(&led_green, 1);
 
