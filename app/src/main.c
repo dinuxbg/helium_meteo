@@ -764,6 +764,10 @@ void shell_cb(enum shell_cmd_event event, void *data) {
 	case SHELL_CMD_SEND_TIMER:
 		update_send_timer(ctx);
 		break;
+	case SHELL_CMD_SEND_TIMER_GET:
+		time_t time_st_left = k_timer_remaining_get(&ctx->send_timer);
+		LOG_INF("Send timer %lld sec left", time_st_left / 1000);
+		break;
 	default:
 		LOG_WRN("Unknown shell cmd event");
 		break;

@@ -8,6 +8,7 @@
 
 enum shell_cmd_event {
 	SHELL_CMD_SEND_TIMER,
+	SHELL_CMD_SEND_TIMER_GET,
 };
 
 #define DL_SHELL_CMD_BUF_SIZE 64
