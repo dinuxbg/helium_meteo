@@ -842,6 +842,8 @@ int main(void)
 	}
 #endif
 
+	init_timers(ctx);
+
 #if 0
 	ret = init_accel(ctx);
 	if (ret) {
@@ -877,8 +879,6 @@ int main(void)
 		sys_reboot(SYS_REBOOT_WARM);
 		goto fail;
 	}
-
-	init_timers(ctx);
 
 	while (true) {
 		LOG_INF("Waiting for events...");
