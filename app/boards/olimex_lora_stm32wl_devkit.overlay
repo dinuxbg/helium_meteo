@@ -1,0 +1,81 @@
+
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
+
+/ {
+        model = "Olimex LoRa STM32WL DevKit";
+        compatible = "olimex,lora-stm32wl-devkit";
+
+        chosen {
+                zephyr,console = &lpuart1;
+                zephyr,shell-uart = &lpuart1;
+                zephyr,sram = &sram0;
+                zephyr,flash = &flash0;
+                zephyr,code-partition = &slot0_partition;
+        };
+
+};
+
+&uext_spi {
+	status = "disabled";
+};
+
+&bme280 {
+	status = "okay";
+};
+
+&usart1 {
+	status = "disabled";
+};
+
+#if 0
+&pinctrl {
+	powerdown_pa9: powerdown_pa9 {
+		pinmux = <STM32_PINMUX('A', 9, GPIO)>;
+		output-high;
+		bias-disable;
+	};
+	powerdown_pa10: powerdown_pa10{
+		pinmux = <STM32_PINMUX('A', 10, GPIO)>;
+		output-high;
+		bias-disable;
+	};
+};
+#endif
+
+&uext_i2c {
+	pinctrl-1 = <&analog_pa9 &analog_pa10>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+
+	status = "okay";
+};
+
+&lpuart1_rx_pa3 {
+	bias-pull-up;
+};
+
+&lpuart1_tx_pa2 {
+	bias-pull-up;
+};
+
+&lpuart1 {
+        clocks = <&rcc STM32_CLOCK_BUS_APB1_2 0x00000001>,
+                <&rcc STM32_SRC_LSE LPUART1_SEL(3)>;
+
+	current-speed = <9600>;
+
+	wakeup-source;
+
+        /* Configure sleep pinctrl configuration which will be used when
+         * device is not configured as wakeup source by the application.
+         * This use case is only applicable in PM_DEVICE mode.
+         */
+        pinctrl-1 = <&analog_pa3 &analog_pa2>;
+        pinctrl-names = "default", "sleep";
+
+};
+
+
+&clk_lse {
+	status = "okay";
+};

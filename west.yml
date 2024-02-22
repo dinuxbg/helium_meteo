@@ -3,13 +3,11 @@
 
 manifest:
   self:
-    path: graywater_box
+    path: helium_meteo
 
   remotes:
     - name: upstream
       url-base: https://github.com/zephyrproject-rtos
-    - name: retfie
-      url-base: https://github.com/retfie
 
   projects:
     - name: zephyr

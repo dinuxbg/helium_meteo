@@ -30,10 +30,6 @@ struct s_lorawan_config
 	bool auto_join;
 	/* Send repeat time in seconds */
 	uint32_t send_repeat_time;
-	/* Min delay time for sensors in seconds */
-	uint32_t send_min_delay;
-	/* Max GPS on time in seconds */
-	uint32_t max_gps_on_time;
 	/* Max attempt to join network */
 	uint8_t join_try_count;
 	/* Max LoraWAN join sessions retry count before reboot */
@@ -48,29 +44,20 @@ struct s_lorawan_config
 
 extern struct s_lorawan_config lorawan_config;
 
-struct s_mapper_data
+struct s_meteo_data
 {
-	uint32_t lat;
-	uint32_t lng;
-	uint16_t alt;
-	uint16_t accuracy;
-	uint16_t battery;
-	uint8_t fix;
-	uint8_t satellites;
+	uint32_t temp_mK;
+	uint32_t pressure_Pa;
+	uint8_t humidity_percent;
+	uint16_t battery_mV;
 } __packed;
 
 struct s_status {
 	bool joined;
 	bool delayed_active;
-	bool gps_pwr_on;
-	time_t last_pos_send;
-	time_t last_pos_send_ok;
-	time_t last_accel_event;
 	uint32_t msgs_sent;
 	uint32_t msgs_failed;
 	uint32_t msgs_failed_total;
-	uint64_t gps_total_on_time;
-	uint32_t acc_events;
 	uint16_t join_retry_sessions_count;
 };
 

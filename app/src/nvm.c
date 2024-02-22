@@ -6,9 +6,9 @@
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(helium_mapper_nvm);
+LOG_MODULE_REGISTER(helium_meteo_nvm);
 
-#define HELIUM_MAPPER_SETTINGS_BASE "helium_mapper/nvm"
+#define HELIUM_METEO_SETTINGS_BASE "helium_meteo/nvm"
 
 struct hm_nvm_setting_descr {
 	const char *name;
@@ -21,7 +21,7 @@ struct hm_nvm_setting_descr {
 	{									\
 		.name = STRINGIFY(_member),					\
 		.setting_name =							\
-			HELIUM_MAPPER_SETTINGS_BASE "/" STRINGIFY(_member),	\
+			HELIUM_METEO_SETTINGS_BASE "/" STRINGIFY(_member),	\
 		.offset = offsetof(struct s_lorawan_config, _member),			\
 		.size = sizeof(((struct s_lorawan_config *)0)->_member),		\
 	}
@@ -33,8 +33,6 @@ static const struct hm_nvm_setting_descr hm_nvm_setting_descriptors[] = {
 	HM_NVM_SETTING_DESCR(confirmed_msg),
 	HM_NVM_SETTING_DESCR(auto_join),
 	HM_NVM_SETTING_DESCR(send_repeat_time),
-	HM_NVM_SETTING_DESCR(send_min_delay),
-	HM_NVM_SETTING_DESCR(max_gps_on_time),
 };
 
 void hm_lorawan_nvm_save_settings(const char *name)
@@ -118,9 +116,9 @@ int config_nvm_data_restore(void)
 {
 	int err = 0;
 
-	LOG_DBG("Restoring helium_mapper config settings");
+	LOG_DBG("Restoring helium_meteo config settings");
 
-	err = settings_load_subtree_direct(HELIUM_MAPPER_SETTINGS_BASE,
+	err = settings_load_subtree_direct(HELIUM_METEO_SETTINGS_BASE,
 					   hm_on_setting_loaded,
 					   (void *)&lorawan_config);
 	if (err) {

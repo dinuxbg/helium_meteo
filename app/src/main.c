@@ -12,36 +12,33 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/drivers/uart.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/pm/policy.h>
+
 
 #include "lorawan_config.h"
 #if IS_ENABLED(CONFIG_ADC)
 #include "battery.h"
 #endif
 #include "nvm.h"
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-#include "gps.h"
-#endif
 #if IS_ENABLED(CONFIG_SHELL)
 #include "shell.h"
-#endif
-#if IS_ENABLED(CONFIG_BT)
-#include "ble.h"
 #endif
 
 #define LOG_LEVEL CONFIG_LOG_DEFAULT_LEVEL
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(helium_mapper);
+LOG_MODULE_REGISTER(helium_meteo);
 
-// TODO!!! define green_led and blue_led aliases into DT
-#define LED_GREEN_NODE DT_ALIAS(led0)
-#define LED_BLUE_NODE DT_ALIAS(led0)
 /*
  * A build error on this line means your board is unsupported.
  * See the sample documentation for information on how to fix this.
  */
-static struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(LED_GREEN_NODE, gpios);
-static struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(LED_BLUE_NODE, gpios);
+static const struct gpio_dt_spec dt_led0 = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+static const struct gpio_dt_spec dt_sw0 = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
+static struct gpio_callback user_button_cb_data;
+
+const struct device *const dev_console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+
 
 struct s_lorawan_config lorawan_config = {
 	.dev_eui = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07 },
@@ -53,56 +50,42 @@ struct s_lorawan_config lorawan_config = {
 	.confirmed_msg = LORAWAN_MSG_UNCONFIRMED,
 	.app_port = 2,
 	.auto_join = false,
-	.send_repeat_time = 0,
-	.send_min_delay = 30,
-	.max_gps_on_time = 300,
+	.send_repeat_time = 3600 / 2,
 	/* max join attempt in one join session */
 	.join_try_count = 5,
 	/* max join sessions before give up and reboot. 20 * 5 = 100 join attempts */
 	.max_join_retry_sessions_count = 20,
 	/* max join session interval in sec */
 	.join_try_interval = 300,
-	.max_inactive_time_window = 3 * 3600,
+	.max_inactive_time_window = 2 * 3600,
 	.max_failed_msg = 120,
 };
 
 struct s_status lorawan_status = {
 	.joined = false,
-	.delayed_active = false,
-	.gps_pwr_on = false,
-	.last_pos_send = 0,
-	.last_pos_send_ok = 0,
-	.last_accel_event = 0,
 	.msgs_sent = 0,
 	.msgs_failed = 0,
 	.msgs_failed_total = 0,
-	.gps_total_on_time = 0,
-	.acc_events = 0,
 	.join_retry_sessions_count = 0,
 };
 
-struct s_mapper_data mapper_data;
-char *data_ptr = (char*)&mapper_data;
+struct s_meteo_data meteo_data;
+char *data_ptr = (char*)&meteo_data;
 
 #define LORA_JOIN_THREAD_STACK_SIZE 1500
 #define LORA_JOIN_THREAD_PRIORITY 10
 K_KERNEL_STACK_MEMBER(lora_join_thread_stack, LORA_JOIN_THREAD_STACK_SIZE);
 
-struct s_helium_mapper_ctx {
+struct s_helium_meteo_ctx {
 	const struct device *lora_dev;
-	const struct device *accel_dev;
+	const struct device *meteo_dev;
 	struct k_timer send_timer;
-	struct k_timer delayed_timer;
-	struct k_timer gps_off_timer;
 	struct k_timer lora_join_timer;
 	struct k_thread thread;
 	struct k_sem lora_join_sem;
-	bool gps_fix;
 };
 
-struct s_helium_mapper_ctx g_ctx = {
-	.gps_fix = false,
-};
+struct s_helium_meteo_ctx g_ctx;
 
 enum lorawan_state_e {
 	NOT_JOINED,
@@ -115,10 +98,8 @@ K_FIFO_DEFINE(evt_fifo);
 
 enum evt_t {
 	EV_TIMER,
-	EV_ACC,
-	EV_GPS_FIX,
-	EV_NMEA_TRIG_ENABLE,
-	EV_NMEA_TRIG_DISABLE,
+	EV_BUTTON,
+	EV_SEND_DATA,
 };
 
 struct app_evt_t {
@@ -187,15 +168,9 @@ static inline struct app_evt_t *app_evt_alloc(void)
 
 static K_SEM_DEFINE(evt_sem, 0, 1);	/* starts off "not available" */
 
-void update_gps_off_timer(struct s_helium_mapper_ctx *ctx) {
-	uint32_t timeout = lorawan_config.max_gps_on_time;
 
-	LOG_INF("GPS off timer start for %d sec", timeout);
-
-	k_timer_start(&ctx->gps_off_timer, K_SECONDS(timeout), K_NO_WAIT);
-}
-
-void update_send_timer(struct s_helium_mapper_ctx *ctx) {
+void update_send_timer(struct s_helium_meteo_ctx *ctx)
+{
 	uint32_t time = lorawan_config.send_repeat_time;
 
 	if (time) {
@@ -218,92 +193,74 @@ static void send_timer_handler(struct k_timer *timer)
 	k_sem_give(&evt_sem);
 }
 
-static void delayed_timer_handler(struct k_timer *timer)
+void user_button_pressed(const struct device *dev, struct gpio_callback *cb,
+                    uint32_t pins)
 {
 	struct app_evt_t *ev;
 
-	LOG_INF("Delayed timer handler");
-
-	lorawan_status.delayed_active = false;
+	LOG_INF("Button handler");
 
 	ev = app_evt_alloc();
-	ev->event_type = EV_NMEA_TRIG_ENABLE;
+	ev->event_type = EV_BUTTON;
 	app_evt_put(ev);
 	k_sem_give(&evt_sem);
 }
 
-static void gps_off_timer_handler(struct k_timer *timer)
+
+int init_buttons(void)
 {
-	struct app_evt_t *ev;
+	int err;
 
-	LOG_INF("GPS off timer handler");
+	if (!dt_sw0.port) {
+		LOG_INF("User button not available");
+		return -ENODEV;
+	}
+	if (!device_is_ready(dt_sw0.port)) {
+		LOG_ERR("User button device not ready");
+		return -ENODEV;
+	}
+	err = gpio_pin_configure_dt(&dt_sw0, GPIO_INPUT);
+	if (err) {
+		LOG_ERR("failed to configure user button gpio: %d", err);
+		return err;
+	}
+	err = gpio_pin_interrupt_configure_dt(&dt_sw0, GPIO_INT_EDGE_TO_ACTIVE);
+	if (err) {
+		LOG_ERR("failed to configure user button gpio: %d", err);
+		return err;
+	}
+	gpio_init_callback(&user_button_cb_data, user_button_pressed, BIT(dt_sw0.pin));
+	gpio_add_callback(dt_sw0.port, &user_button_cb_data);
 
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-	gps_enable(GPS_DISABLE);
-#endif
-
-	ev = app_evt_alloc();
-	ev->event_type = EV_NMEA_TRIG_DISABLE;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
+	return err;
 }
-
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-static void gps_trigger_handler(const struct device *dev,
-		const struct sensor_trigger *trig)
-{
-	struct app_evt_t *ev;
-
-	LOG_INF("GPS trigger handler");
-
-	/** Disable NMEA trigger after successful location fix */
-	nmea_trigger_enable(GPS_TRIG_DISABLE);
-
-	ev = app_evt_alloc();
-	ev->event_type = EV_GPS_FIX;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
-}
-#endif
 
 int init_leds(void)
 {
 	int err = 0;
 
-	if (!led_green.port) {
-		LOG_INF("Green LED not available");
-	} else if (!device_is_ready(led_green.port)) {
-		LOG_ERR("Green LED device not ready");
-		led_green.port = NULL;
-		err = -ENODEV;
-	} else {
-		/* Init green led as output and turn it on boot */
-		err = gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
-		if (err) {
-			LOG_ERR("failed to configure Green LED gpio: %d", err);
-			led_green.port = NULL;
-		}
+	if (!dt_led0.port) {
+		LOG_INF("LED0 not available");
+		return -ENODEV;
 	}
-
-	if (!led_blue.port) {
-		LOG_INF("Blue LED not available");
-	} else if (!device_is_ready(led_blue.port)) {
-		LOG_ERR("Blue LED device not ready");
-		led_blue.port = NULL;
-		err = -ENODEV;
-	} else {
-		/* Init blue led as output and turn it on boot */
-		err = gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_ACTIVE);
-		if (err) {
-			LOG_ERR("failed to configure Blue LED gpio: %d", err);
-			led_blue.port = NULL;
-		}
+	if (!device_is_ready(dt_led0.port)) {
+		LOG_ERR("LED0 device not ready");
+		return -ENODEV;
 	}
+	/* Init led as output and turn it off */
+	err = gpio_pin_configure_dt(&dt_led0, GPIO_OUTPUT_INACTIVE);
+	if (err) {
+		LOG_ERR("failed to configure LED0 gpio: %d", err);
+		return err;
+	}
+	/* This is required to reach low-power modes. */
+	err = gpio_pin_configure_dt(&dt_led0, GPIO_DISCONNECTED);
 
 	return err;
 }
 
-void led_enable(const struct gpio_dt_spec *led, int enable) {
+void led_enable(const struct gpio_dt_spec *led, int enable)
+{
 	if (led->port) {
 		gpio_pin_set_dt(led, enable);
 	}
@@ -335,154 +292,27 @@ static void lorwan_datarate_changed(enum lorawan_datarate dr)
 	LOG_INF("New Datarate: DR_%d, Max Payload %d", dr, max_size);
 }
 
-static const enum sensor_channel channels[] = {
-	SENSOR_CHAN_ACCEL_X,
-	SENSOR_CHAN_ACCEL_Y,
-	SENSOR_CHAN_ACCEL_Z,
-};
-
-struct s_accel_values {
-	struct sensor_value val;
-	const char *sign;
-};
-
-static int print_accels(const struct device *dev)
+static int init_meteo(struct s_helium_meteo_ctx *ctx)
 {
-	int err;
-	struct s_accel_values accel[3] = {
-		{.sign = ""},
-		{.sign = ""},
-		{.sign = ""}
-	};
+        ctx->meteo_dev = DEVICE_DT_GET_ANY(bosch_bme280);
 
-	err = sensor_sample_fetch(dev);
-	if (err < 0) {
-		LOG_ERR("%s: sensor_sample_fetch() failed: %d", dev->name, err);
-		return err;
-	}
+        if (ctx->meteo_dev == NULL) {
+                /* No such node, or the node does not have status "okay". */
+                LOG_ERR("No BME280 device found.\n");
+                return -ENODEV;
+        }
 
-	for (size_t i = 0; i < ARRAY_SIZE(channels); i++) {
-		err = sensor_channel_get(dev, channels[i], &accel[i].val);
-		if (err < 0) {
-			LOG_ERR("%s: sensor_channel_get(%c) failed: %d\n",
-					dev->name, 'X' + i, err);
-			return err;
-		}
-		if ((accel[i].val.val1 < 0) || (accel[i].val.val2 < 0)) {
-			accel[i].sign = "-";
-			accel[i].val.val1 = abs(accel[i].val.val1);
-			accel[i].val.val2 = abs(accel[i].val.val2);
-		}
-	}
+        if (!device_is_ready(ctx->meteo_dev)) {
+                LOG_ERR("Device \"%s\" is not ready; "
+                       "check the driver initialization logs for errors.\n",
+                       ctx->meteo_dev->name);
+                return -EBUSY;
+        }
 
-	LOG_INF("%s: %d, %s%d.%06d, %s%d.%06d, %s%d.%06d (m/s^2)",
-		dev->name, lorawan_status.acc_events,
-		accel[0].sign, accel[0].val.val1, accel[0].val.val2,
-		accel[1].sign, accel[1].val.val1, accel[1].val.val2,
-		accel[2].sign, accel[2].val.val1, accel[2].val.val2);
+        LOG_INF("Found device \"%s\", getting sensor data\n", ctx->meteo_dev->name);
 
-	return 0;
+        return 0;
 }
-
-#ifdef CONFIG_LIS2DH_TRIGGER
-static void trigger_handler(const struct device *dev,
-		const struct sensor_trigger *trig)
-{
-	struct app_evt_t *ev;
-
-	LOG_INF("ACC trigger handler");
-
-	/* bounce very "touchy" accell sensor */
-	if ((k_uptime_get_32() - lorawan_status.last_accel_event) < 5000) {
-		return;
-	}
-	lorawan_status.last_accel_event = k_uptime_get_32();
-	lorawan_status.acc_events++;
-
-	ev = app_evt_alloc();
-	ev->event_type = EV_ACC;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
-}
-#endif
-
-#if 0
-int init_accel(struct s_helium_mapper_ctx *ctx)
-{
-	const struct device *accel_dev;
-	int err = 0;
-
-	accel_dev = DEVICE_DT_GET(DT_ALIAS(accel0));
-	if (!device_is_ready(accel_dev)) {
-		LOG_ERR("%s: device not ready.", accel_dev->name);
-		return -ENODEV;
-	}
-
-	ctx->accel_dev = accel_dev;
-
-	print_accels(accel_dev);
-
-#if CONFIG_LIS2DH_TRIGGER
-	struct sensor_trigger trig;
-	enum sensor_channel chan = SENSOR_CHAN_ACCEL_XYZ;
-
-	if (IS_ENABLED(CONFIG_LIS2DH_ODR_RUNTIME)) {
-		struct sensor_value attr = {
-			.val1 = 10,
-			.val2 = 0,
-		};
-
-		err = sensor_attr_set(accel_dev, chan,
-				SENSOR_ATTR_SAMPLING_FREQUENCY,
-				&attr);
-		if (err != 0) {
-			LOG_ERR("Failed to set odr: %d", err);
-			return err;
-		}
-		LOG_INF("Sampling at %u Hz", attr.val1);
-
-		/* set slope threshold to 30 dps */
-		sensor_degrees_to_rad(30, &attr); /* convert to rad/s */
-
-		if (sensor_attr_set(accel_dev, chan,
-					SENSOR_ATTR_SLOPE_TH, &attr) < 0) {
-			LOG_ERR("Accel: cannot set slope threshold.\n");
-			return err;
-		}
-
-		/* set slope duration to 4 samples */
-		attr.val1 = 4;
-		attr.val2 = 0;
-
-		if (sensor_attr_set(accel_dev, chan,
-					SENSOR_ATTR_SLOPE_DUR, &attr) < 0) {
-			LOG_ERR("Accel: cannot set slope duration.\n");
-			return err;
-		}
-
-#if CONFIG_LIS2DH_ACCEL_HP_FILTERS
-		/* Set High Pass filter for int 1 */
-		attr.val1 = 1U;
-		attr.val2 = 0;
-		if (sensor_attr_set(accel_dev, chan,
-					SENSOR_ATTR_CONFIGURATION, &attr) < 0) {
-			LOG_ERR("Accel: cannot set high pass filter for int 1.");
-			return err;
-		}
-#endif
-	}
-
-	trig.type = SENSOR_TRIG_DELTA;
-	trig.chan = chan;
-
-	err = sensor_trigger_set(accel_dev, &trig, trigger_handler);
-	if (err != 0) {
-		LOG_ERR("Failed to set trigger: %d", err);
-	}
-#endif
-	return err;
-}
-#endif
 
 static const char *lorawan_state_str(enum lorawan_state_e state)
 {
@@ -496,7 +326,7 @@ static const char *lorawan_state_str(enum lorawan_state_e state)
 	return "UNKNOWN";
 }
 
-void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
+void lorawan_state(struct s_helium_meteo_ctx *ctx, enum lorawan_state_e state)
 {
 	uint32_t join_try_interval_sec = lorawan_config.join_try_interval;
 
@@ -508,9 +338,6 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 			LOG_WRN("Join is not enabled");
 			break;
 		}
-		/* Turn green led on to indicate not joined state */
-		led_enable(&led_green, 1);
-
 		lorawan_status.joined = false;
 		LOG_INF("Lora join timer start for %d sec", join_try_interval_sec);
 		k_timer_start(&ctx->lora_join_timer, K_SECONDS(join_try_interval_sec),
@@ -519,9 +346,6 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 		break;
 
 	case JOINED:
-		/* Turn green led off on join success */
-		led_enable(&led_green, 0);
-
 		lorawan_status.joined = true;
 		lorawan_status.join_retry_sessions_count = 0;
 		LOG_INF("Stop Lora join retry timer");
@@ -536,8 +360,8 @@ void lorawan_state(struct s_helium_mapper_ctx *ctx, enum lorawan_state_e state)
 
 static void lora_join_timer_handler(struct k_timer *timer)
 {
-	struct s_helium_mapper_ctx *ctx =
-		CONTAINER_OF(timer, struct s_helium_mapper_ctx, lora_join_timer);
+	struct s_helium_meteo_ctx *ctx =
+		CONTAINER_OF(timer, struct s_helium_meteo_ctx, lora_join_timer);
 
 	LOG_INF("LoraWAN join timer handler");
 
@@ -547,10 +371,14 @@ static void lora_join_timer_handler(struct k_timer *timer)
 	}
 }
 
-int join_lora(struct s_helium_mapper_ctx *ctx) {
+int join_lora(struct s_helium_meteo_ctx *ctx)
+{
+	struct pm_policy_latency_request req;
 	struct lorawan_join_config join_cfg;
 	int retry = lorawan_config.join_try_count;
 	int ret = 0;
+
+	pm_policy_latency_request_add(&req, 3);
 
 	join_cfg.mode = lorawan_config.lora_mode;
 	join_cfg.dev_eui = lorawan_config.dev_eui;
@@ -575,10 +403,13 @@ int join_lora(struct s_helium_mapper_ctx *ctx) {
 		}
 	}
 
+	pm_policy_latency_request_remove(&req);
+
 	return ret;
 }
 
-static void lora_join_thread(struct s_helium_mapper_ctx *ctx) {
+static void lora_join_thread(struct s_helium_meteo_ctx *ctx)
+{
 	uint16_t retry_count_conf = lorawan_config.max_join_retry_sessions_count;
 	int err;
 
@@ -598,7 +429,8 @@ static void lora_join_thread(struct s_helium_mapper_ctx *ctx) {
 	}
 }
 
-int init_lora(struct s_helium_mapper_ctx *ctx) {
+int init_lora(struct s_helium_meteo_ctx *ctx)
+{
 	const struct device *lora_dev;
 	int ret;
 
@@ -634,19 +466,16 @@ int init_lora(struct s_helium_mapper_ctx *ctx) {
 	return 0;
 }
 
-void init_timers(struct s_helium_mapper_ctx *ctx)
+void init_timers(struct s_helium_meteo_ctx *ctx)
 {
 	k_timer_init(&ctx->send_timer, send_timer_handler, NULL);
-	k_timer_init(&ctx->delayed_timer, delayed_timer_handler, NULL);
-	k_timer_init(&ctx->gps_off_timer, gps_off_timer_handler, NULL);
 	k_timer_init(&ctx->lora_join_timer, lora_join_timer_handler, NULL);
 
 	update_send_timer(ctx);
 }
 
-void send_event(struct s_helium_mapper_ctx *ctx) {
-	time_t min_delay = lorawan_config.send_min_delay * 1000;
-	time_t last_pos_send = lorawan_status.last_pos_send;
+void send_event(struct s_helium_meteo_ctx *ctx)
+{
 	struct app_evt_t *ev;
 
 	if (!lorawan_status.joined) {
@@ -659,37 +488,16 @@ void send_event(struct s_helium_mapper_ctx *ctx) {
 		return;
 	}
 
-	if (lorawan_status.delayed_active) {
-		time_t time_left = k_timer_remaining_get(&ctx->delayed_timer);
-		LOG_INF("Delayed timer already active, %lld sec left",
-				time_left / 1000);
-		return;
-	}
-
-	if ((k_uptime_get_32() - last_pos_send) > min_delay) {
-		/* Enable NMEA trigger and wait for location fix */
-		ev = app_evt_alloc();
-		ev->event_type = EV_NMEA_TRIG_ENABLE;
-		app_evt_put(ev);
-		k_sem_give(&evt_sem);
-	} else {
-		time_t now_ms = k_uptime_get_32();
-		time_t wait_time =
-			abs(min_delay - (now_ms - last_pos_send) >= 0)
-			? (min_delay - (now_ms - last_pos_send)) : min_delay;
-
-		LOG_INF("Delayed timer start for %lld sec", wait_time / 1000);
-		k_timer_start(&ctx->delayed_timer, K_MSEC(wait_time), K_NO_WAIT);
-		lorawan_status.delayed_active = true;
-	}
+	ev = app_evt_alloc();
+	ev->event_type = EV_SEND_DATA;
+	app_evt_put(ev);
+	k_sem_give(&evt_sem);
 }
 
-void lora_send_msg(struct s_helium_mapper_ctx *ctx)
+void lora_send_msg(struct s_helium_meteo_ctx *ctx)
 {
-	int64_t last_pos_send_ok_sec;
-	int64_t delta_sent_ok_sec;
+	struct pm_policy_latency_request req;
 	uint8_t msg_type = lorawan_config.confirmed_msg;
-	uint32_t inactive_time_window_sec = lorawan_config.max_inactive_time_window;
 	uint32_t max_failed_msgs = lorawan_config.max_failed_msg;
 	int err;
 
@@ -698,24 +506,47 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 		return;
 	}
 
-	memset(data_ptr, 0, sizeof(struct s_mapper_data));
+	pm_policy_latency_request_add(&req, 3);
 
-	mapper_data.fix = ctx->gps_fix ? 1 : 0;
+	memset(data_ptr, 0, sizeof(struct s_meteo_data));
+
+	if (ctx->meteo_dev != NULL) {
+		struct sensor_value temperature, press, humidity;
+
+		err = sensor_sample_fetch(ctx->meteo_dev);
+		if (err != 0)
+			LOG_ERR("sensor_sample_fetch failed: %d", err);
+
+		err = sensor_channel_get(ctx->meteo_dev, SENSOR_CHAN_AMBIENT_TEMP, &temperature);
+		if (err != 0)
+			LOG_ERR("get temperature failed: %d", err);
+		err = sensor_channel_get(ctx->meteo_dev, SENSOR_CHAN_PRESS, &press);
+		if (err != 0)
+			LOG_ERR("get pressure failed: %d", err);
+		err = sensor_channel_get(ctx->meteo_dev, SENSOR_CHAN_HUMIDITY, &humidity);
+		if (err != 0)
+			LOG_ERR("get humidity failed: %d", err);
+
+		LOG_INF("meteo: %d Cel ; %d %%RH\n", temperature.val1, humidity.val1);
+
+		/* Celsius to milliKelvin. */
+		meteo_data.temp_mK = (temperature.val1 + 273) * 1000 + (temperature.val2 / 1000 + 150);
+		/* KPa to Pa */
+		meteo_data.pressure_Pa = press.val1 * 1000;
+		/* Both Zephyr and Helium Meteo in percents. */
+		meteo_data.humidity_percent = humidity.val1;
+	}
 
 #if IS_ENABLED(CONFIG_ADC)
 	int batt_mV;
 	err = read_battery(&batt_mV);
 	if (err == 0) {
-		mapper_data.battery = (uint16_t)batt_mV;
+		meteo_data.battery_mV = (uint16_t)batt_mV;
 	}
 #endif
 
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-	read_location(&mapper_data);
-#endif
-
-	LOG_HEXDUMP_DBG(data_ptr, sizeof(struct s_mapper_data),
-			"mapper_data");
+	LOG_HEXDUMP_DBG(data_ptr, sizeof(struct s_meteo_data),
+			"meteo_data");
 
 	/* Send at least one confirmed msg on every 10 to check connectivity */
 	if (msg_type == LORAWAN_MSG_UNCONFIRMED &&
@@ -725,9 +556,9 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 
 	LOG_INF("Lora send -------------->");
 
-	led_enable(&led_blue, 1);
+	led_enable(&dt_led0, 1);
 	err = lorawan_send(lorawan_config.app_port,
-			data_ptr, sizeof(struct s_mapper_data),
+			data_ptr, sizeof(struct s_meteo_data),
 			msg_type);
 	if (err < 0) {
 		//TODO: make special LED pattern in this case
@@ -737,32 +568,21 @@ void lora_send_msg(struct s_helium_mapper_ctx *ctx)
 	} else {
 		lorawan_status.msgs_sent++;
 		lorawan_status.msgs_failed = 0;
-		/* Remember last successfuly send message time */
-		lorawan_status.last_pos_send_ok = k_uptime_get();
 		LOG_INF("Data sent!");
 	}
-	led_enable(&led_blue, 0);
+	led_enable(&dt_led0, 0);
 
-	/* Remember last send time */
-	lorawan_status.last_pos_send = k_uptime_get();
-
-	ctx->gps_fix = false;
-
-	last_pos_send_ok_sec = lorawan_status.last_pos_send_ok;
-	delta_sent_ok_sec = k_uptime_delta(&last_pos_send_ok_sec) / 1000;
-	LOG_INF("delta_sent_ok_sec: %lld", delta_sent_ok_sec);
-
-	if (lorawan_status.msgs_failed > max_failed_msgs ||
-			delta_sent_ok_sec > inactive_time_window_sec) {
+	if (lorawan_status.msgs_failed > max_failed_msgs) {
 		LOG_ERR("Too many failed msgs: Try to re-join.");
 		lorawan_state(ctx, NOT_JOINED);
 		k_sem_give(&ctx->lora_join_sem);
 	}
+	pm_policy_latency_request_remove(&req);
 }
 
 #if IS_ENABLED(CONFIG_SHELL)
 void shell_cb(enum shell_cmd_event event, void *data) {
-	struct s_helium_mapper_ctx *ctx = (struct s_helium_mapper_ctx *)data;
+	struct s_helium_meteo_ctx *ctx = (struct s_helium_meteo_ctx *)data;
 
 	switch (event) {
 	case SHELL_CMD_SEND_TIMER:
@@ -779,48 +599,23 @@ void shell_cb(enum shell_cmd_event event, void *data) {
 }
 #endif
 
-void app_evt_handler(struct app_evt_t *ev, struct s_helium_mapper_ctx *ctx)
+void app_evt_handler(struct app_evt_t *ev, struct s_helium_meteo_ctx *ctx)
 {
 	switch (ev->event_type) {
 	case EV_TIMER:
 		LOG_INF("Event Timer");
 		send_event(ctx);
+		update_send_timer(ctx);
 		break;
 
-	case EV_ACC:
-		LOG_INF("Event ACC");
-		print_accels(ctx->accel_dev);
+	case EV_BUTTON:
+		LOG_INF("Event Button");
 		send_event(ctx);
 		break;
 
-	case EV_NMEA_TRIG_ENABLE:
-		LOG_INF("Event NMEA_TRIG_ENABLE");
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-		nmea_trigger_enable(GPS_TRIG_ENABLE);
-#endif
-		update_gps_off_timer(ctx);
-		break;
-
-	case EV_NMEA_TRIG_DISABLE:
-		LOG_INF("Event NMEA_TRIG_DISABLE");
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-		nmea_trigger_enable(GPS_TRIG_DISABLE);
-#endif
-		/* If we aren't able to get gps fix during the whole
-		   GPS ON Interval, send lora message with other telemetry
-		   data and old position data if available.
-		*/
-		if (!ctx->gps_fix) {
-			lora_send_msg(ctx);
-		}
-		break;
-
-	case EV_GPS_FIX:
-		LOG_INF("Event GPS_FIX");
-		ctx->gps_fix = true;
+	case EV_SEND_DATA:
 		lora_send_msg(ctx);
 		break;
-
 	default:
 		LOG_ERR("Unknown event");
 		break;
@@ -830,11 +625,16 @@ void app_evt_handler(struct app_evt_t *ev, struct s_helium_mapper_ctx *ctx)
 
 int main(void)
 {
-	struct s_helium_mapper_ctx *ctx = &g_ctx;
+	struct s_helium_meteo_ctx *ctx = &g_ctx;
 	struct app_evt_t *ev;
 	int ret;
 
 	ret = init_leds();
+	if (ret) {
+		return ret;
+	}
+
+	ret = init_buttons();
 	if (ret) {
 		return ret;
 	}
@@ -848,26 +648,21 @@ int main(void)
 
 	init_timers(ctx);
 
-#if 0
-	ret = init_accel(ctx);
+	ret = init_meteo(ctx);
 	if (ret) {
 		goto fail;
 	}
-#endif
-
-#if IS_ENABLED(CONFIG_UBLOX_MAX7Q)
-	ret = init_gps();
-	if (ret) {
-		goto fail;
-	}
-
-	ret = gps_set_trigger_handler(gps_trigger_handler);
-	if (ret) {
-		goto fail;
-	}
-#endif
 
 #if IS_ENABLED(CONFIG_SHELL)
+	if (device_is_ready(dev_console) && pm_device_wakeup_is_capable(dev_console)) {
+		ret = pm_device_wakeup_enable(dev_console, true);
+		if (!ret) {
+			printk("Could not enable wakeup source\n");
+		} else {
+			printk("Wakeup source enable ok\n");
+		}
+	}
+
 	ret = init_shell();
 	if (ret) {
 		goto fail;
@@ -897,10 +692,10 @@ int main(void)
 
 fail:
 	while (true) {
-		if (led_blue.port) {
-			gpio_pin_set_dt(&led_blue, 0);
+		if (dt_led0.port) {
+			gpio_pin_set_dt(&dt_led0, 0);
 			k_sleep(K_MSEC(250));
-			gpio_pin_set_dt(&led_blue, 1);
+			gpio_pin_set_dt(&dt_led0, 1);
 		}
 		k_sleep(K_SECONDS(1));
 	}
