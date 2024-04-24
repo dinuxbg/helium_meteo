@@ -8,11 +8,13 @@ manifest:
   remotes:
     - name: upstream
       url-base: https://github.com/zephyrproject-rtos
+    - name: dinuxbg
+      url-base: https://github.com/dinuxbg
 
   projects:
     - name: zephyr
-      remote: upstream
-      revision: main
+      remote: dinuxbg
+      revision: stm32_i2c_pm_fix
       import:
         name-allowlist:
           - hal_stm32
