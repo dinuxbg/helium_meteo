@@ -6,7 +6,7 @@ Helium Meteo is a small battery-powered device for measuring temperature, humidi
 
 Data is received from the Helium network by the provided simple ![integration server](integration/README.md) implementation. A cheap ARM single-board computer is usually sufficient to run it at home.
 
-See below an overview of the software architecture below. This project provides the components colored in red:
+See below an overview of the software architecture. This project provides the components colored in red:
 
 ![](images/software-arch.png)
 
@@ -71,8 +71,6 @@ lorawan auto_join true
 kernel reboot cold
 ```
 
-
-## Acknowledgements
 ## Acknowledgements
 
 This project is heavily based on https://github.com/retfie/helium_mapper .
