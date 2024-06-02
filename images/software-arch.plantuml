@@ -1,0 +1,45 @@
+@startuml
+
+component helium_meteo #red [
+Helium Meteo
+=====
+BB-STM32WL-ANT
+BME280
+]
+
+
+component hotspot [
+Hotspot
+]
+
+cloud helium_packet_router [
+Helium Packet Router
+]
+
+cloud lorawan_network_server [
+lorawan network server
+]
+
+cloud helium_iot_config_service [
+Helium IOT Config Service
+]
+
+cloud helium_integration #red [
+Integration Server 
+]
+
+database DB #red [
+SQLite DB
+]
+
+helium_meteo -[dotted,thickness=5]-> hotspot : LoRaWan Radio
+hotspot -right-> helium_packet_router
+helium_packet_router -right-> lorawan_network_server
+lorawan_network_server -up-> helium_integration : HTTP POST JSON
+helium_integration -up-> DB
+
+helium_packet_router <-up-> helium_iot_config_service
+lorawan_network_server -up-> helium_iot_config_service
+
+@enduml
+

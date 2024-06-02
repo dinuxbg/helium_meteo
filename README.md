@@ -1,11 +1,21 @@
 ## Introduction
 
-Helium Meteo is a small battery-powered device for measuring temperature, humidity and atmospheric pressure. Data samples are transmitted via Helium LoRaWan.
+![](images/helium-meteo-breadboard.png)
+
+Helium Meteo is a small battery-powered device for measuring temperature, humidity and atmospheric pressure. Data samples are transmitted via [Helium](https://www.helium.com/) LoRaWan.
+
+Data is received from the Helium network by the provided simple ![integration server](integration/README.md) implementation. A cheap ARM single-board computer is usually sufficient to run it at home.
+
+See below an overview of the software architecture below. This project provides the components colored in red:
+
+![](images/software-arch.png)
 
 ## BOM
 
  - Olimex [BB-STM32WL-ANT](https://www.olimex.com/Products/IoT/LoRa/BB-STM32WL/).
  - Olimex [MOD-BME280](https://www.olimex.com/Products/Modules/Sensors/MOD-BME280/open-source-hardware).
+
+Wiring is simple - connect ground, VCC and I2C from MOD-BME280 to the respective pins of BB-STM32WL. There is no need for pull-ups - MOD-BME280 already has them.
 
 ## Getting Started
 
@@ -49,6 +59,20 @@ Hook a serial UART to LPUSART1. You would get access to a shell running on the d
 screen /dev/ttyACM0 9600
 ```
 
+Type `help` to get a list of supported commands.
+
+### Configuring Helium parameters
+In order to connect to the Helium network, you must first set the [keys](https://docs.helium.com/console/adding-devices/). Reboot the board after that for the settings to take effect.
+```
+lorawan dev_eui AABBCCDDEEFF0011
+lorawan app_eui 0102030405060708
+lorawan app_key 123456789ABCDEFFEDCBA98765432101
+lorawan auto_join true
+kernel reboot cold
+```
+
+
+## Acknowledgements
 ## Acknowledgements
 
 This project is heavily based on https://github.com/retfie/helium_mapper .
