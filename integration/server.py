@@ -27,20 +27,33 @@ class Server(BaseHTTPRequestHandler):
         self.wfile.write("42".encode('utf-8'))
 
     def do_POST(self):
+        self.send_response(200)
+        self.end_headers()
+
         content_length = int(self.headers['Content-Length']) # <--- Gets the size of data
         post_data = self.rfile.read(content_length) # <--- Gets the data itself
         logging.debug("POST request,\nPath: %s\nHeaders:\n%s\n\nBody:\n%s\n",
                 str(self.path), str(self.headers), post_data.decode('utf-8'))
         try:
-           self.meteo.record(post_data)
+            event = 'unknown'
+            for arg in self.path.split('?'):
+                arg_split = arg.split('=', 3)
+                if len(arg_split) != 2:
+                    continue
+                path_key, path_val = arg_split
+                if path_key == 'event':
+                    event = path_val
+                    break
+            if event == 'up':
+                self.meteo.record(post_data)
+            else:
+                print('Ignoring event ' + event)
         except Exception as e:
             print('Exception occurred with the following json: {}'.format(post_data))
             print('Exception: ' + str(e))
         logging.info('Received: json: {}'.format(post_data))
-        self._set_response()
-        self.wfile.write("42".encode('utf-8'))
 
-def run(server_class=HTTPServer, handler_class=Server, port=8082):
+def run(server_class=HTTPServer, handler_class=Server, port=8085):
     logging.basicConfig(level=logging.INFO)
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)

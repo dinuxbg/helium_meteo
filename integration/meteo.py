@@ -15,6 +15,7 @@ import base64
 import json
 import struct
 import binascii
+import datetime
 
 from Cryptodome.Cipher import AES
 
@@ -87,39 +88,30 @@ class Meteo():
             return cur.lastrowid
 
     # Insert an entry into the hotspot connections table.
-    def record_hotspot(self, report_id, rec):
+    def record_hotspot(self, report_id, rec, frequency_hZ):
         sql = 'INSERT INTO hotspot_connections (report_id, frequency, name_id, rssi, snr) VALUES (?, ?, ?, ?, ?)'
         vals = (report_id,
-                float(rec['frequency']),
-                self.get_hotspot_id(rec['name'], float(rec['lat']), float(rec['long'])),
+                int(frequency_hZ),
+                self.get_hotspot_id(rec['metadata']['gateway_name'], float(rec['metadata']['gateway_lat']), float(rec['metadata']['gateway_long'])),
                 float(rec['rssi']),
                 float(rec['snr']))
         cur = self.conn.cursor()
         cur.execute(sql, vals)
         self.conn.commit()
 
-    # Insert the device label (name), as described in the Helium integration
-    # and passed in the Json metadata.
-    def record_label(self, report_id, j):
-        sql = 'INSERT INTO label_reports (report_id, name_id) VALUES (?, ?)'
-        vals = (report_id,
-                self.get_id_from_string('label_strings', j['name']))
-        cur = self.conn.cursor()
-        cur.execute(sql, vals)
-        self.conn.commit()
-
     # Insert a new report entry.
     def record_report(self, rec, battery_voltage):
-        sql = 'INSERT INTO reports (app_eui_id, dev_eui_id, dev_addr_id, dc_balance, fcnt, port, name_id, battery_voltage, reported_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        vals = (self.get_id_from_string('app_eui', rec['app_eui']),
-                self.get_id_from_string('dev_eui', rec['dev_eui']),
-                self.get_id_from_string('dev_addr', rec['devaddr']),
-                int(rec['dc']['balance']), 
-                int(rec['fcnt']), 
-                int(rec['port']), 
-                self.get_id_from_string('device_names', rec['name']),
+        sql = 'INSERT INTO reports (dev_eui_id, dev_addr_id, dc_balance, fcnt, port, name_id, profile_id, battery_voltage, reported_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        epoch_timestamp_ms = datetime.datetime.fromisoformat(rec['time']).timestamp() * 1000
+        vals = (self.get_id_from_string('dev_eui', rec['deviceInfo']['devEui']),
+                self.get_id_from_string('dev_addr', rec['devAddr']),
+                int(rec['dc']['balance'] if 'dc' in rec else -1),
+                int(rec['fCnt']),
+                int(rec['fPort']),
+                self.get_id_from_string('device_names', rec['deviceInfo']['deviceName']),
+                self.get_id_from_string('profile_names', rec['deviceInfo']['deviceProfileName']),
                 battery_voltage,
-                int(rec['reported_at']))
+                int(epoch_timestamp_ms))
         cur = self.conn.cursor()
         cur.execute(sql, vals)
         self.conn.commit()
@@ -143,21 +135,15 @@ class Meteo():
     def record(self, json_str):
         rec = json.loads(json_str)
 
-        if rec['type'] == 'join':
-            print('Received a JOIN packet.')
-            return
-
         payload = Payload()
-        payload.decode(rec['payload'])
+        payload.decode(rec['data'])
         print(f'T={payload.temperature}°C, P={payload.pressure_Pa/100}hPa, RH={payload.humidity_RH}%, BAT={payload.battery_voltage}mV')
 
         report_id = self.record_report(rec, payload.battery_voltage)
 
         self.record_measurement(report_id, payload)
-        for hotspot in rec['hotspots']:
-            self.record_hotspot(report_id, hotspot)
-        for label in rec['metadata']['labels']:
-            self.record_label(report_id, label)
+        for hotspot in rec['rxInfo']:
+            self.record_hotspot(report_id, hotspot, float(rec['txInfo']['frequency']))
 
 if __name__ == '__main__':
     t = Meteo()
