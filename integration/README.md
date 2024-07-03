@@ -17,14 +17,14 @@ The following instructions are a summary of the [official manual](https://docs.h
 Login in your provider and:
  * Create a new Device Profile.
  * Create a new Application.
-   ** In the Application page, add a new Device.
-   ** Generate a new `dev_eui` for the device by clicking on the spiral arrow button.
-   ** Leave the `join_eui` field empty.
-   ** Select the profile you previously created.
-   ** Click Submit. You'll be prompted for Application key. Generate a new one, and click Submit.
+   * In the Application page, add a new Device.
+   * Generate a new `dev_eui` for the device by clicking on the spiral arrow button.
+   * Leave the `join_eui` field empty.
+   * Select the profile you previously created.
+   * Click Submit. You'll be prompted for Application key. Generate a new one, and click Submit.
  * In the Application page click on Integrations.
-   ** Add HTTP integration.
-   ** Fill-in the URL of your integration server (i.e. the python program in this directory).
+   * Add HTTP integration.
+   * Fill-in the URL of your integration server (i.e. the python program in this directory).
 
 With the above steps you should be able to see Helium POST requests to the URL you have provided.
 
