@@ -65,11 +65,13 @@ Type `help` to get a list of supported commands.
 In order to connect to the Helium network, you must first set the [keys](https://docs.helium.com/console/adding-devices/). Reboot the board after that for the settings to take effect.
 ```
 lorawan dev_eui AABBCCDDEEFF0011
-lorawan app_eui 0102030405060708
+lorawan app_eui 0000000000000000
 lorawan app_key 123456789ABCDEFFEDCBA98765432101
 lorawan auto_join true
 kernel reboot cold
 ```
+
+Note: With the new ChirpStack, `app_eui` should be set to 0. Only the now-deprecated Helium Console requires a valid `app_eui`.
 
 ## Acknowledgements
 
@@ -80,3 +82,4 @@ This project is heavily based on https://github.com/retfie/helium_mapper .
  - Create a custom board definition for Zephyr instead of inheriting stm32wl_devkit.
  - Add more documentation (e.g. how to setup Helium/LoRaWan keys).
  - Add battery voltage measurement to the Lora packet.
+ - Add driver for AHT20 sensor, so that firmware can run directly on [LoRa-STM32WL-DevKit](https://www.olimex.com/Products/IoT/LoRa/LoRa-STM32WL-DevKit/open-source-hardware), no custom wiring required.

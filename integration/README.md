@@ -6,14 +6,29 @@ This project provides an integration HTTP server for accepting data from Helium 
 
 This server is rather simple. Currently all it does is to record the POSTed temperature data in a local [SQLite](https://www.sqlite.org) database. Even then, it fulfills my own need to track data.
 
-## Helium setup
+## Pick a LoRaWAN Network Server Provider
+First you need to pick a LoRaWAN Network Server Provider from the [official list](https://docs.helium.com/iot/find-a-lns-provider/). It is needed to route the data packets sent by the sensor to your integration HTTP server.
 
-From the Helium [console](https://console.helium.com/flows) do:
-  1. Add your [device](https://console.helium.com/devices). Make sure you can see packets coming from the device.
-  2. Add a new HTTP [integration](https://console.helium.com/integrations). Leave the default POST method option. Write the URL of your server.
-  3. Go to the [Flows](https://console.helium.com/flows) menu and connect your device straight to your new integration. A decoder function is not needed.
+Make an account in the LNS you picked. Some LNS offer a small number of free initial [DC](https://docs.helium.com/tokens/data-credit/), but in general you'd need to pay a small sum to buy a batch of DC.
+
+## Helium setup
+The following instructions are a summary of the [official manual](https://docs.helium.com/console/adding-devices/) from Helium.
+
+Login in your provider and:
+ * Create a new Device Profile.
+ * Create a new Application.
+   ** In the Application page, add a new Device.
+   ** Generate a new `dev_eui` for the device by clicking on the spiral arrow button.
+   ** Leave the `join_eui` field empty.
+   ** Select the profile you previously created.
+   ** Click Submit. You'll be prompted for Application key. Generate a new one, and click Submit.
+ * In the Application page click on Integrations.
+   ** Add HTTP integration.
+   ** Fill-in the URL of your integration server (i.e. the python program in this directory).
 
 With the above steps you should be able to see Helium POST requests to the URL you have provided.
+
+Don't forget to configure your device with the `dev_eui` and `app_key` generated from the above steps.
 
 ## Server setup
 
