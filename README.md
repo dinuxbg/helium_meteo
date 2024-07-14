@@ -83,3 +83,4 @@ This project is heavily based on https://github.com/retfie/helium_mapper .
  - Add more documentation (e.g. how to setup Helium/LoRaWan keys).
  - Add battery voltage measurement to the Lora packet.
  - Add driver for AHT20 sensor, so that firmware can run directly on [LoRa-STM32WL-DevKit](https://www.olimex.com/Products/IoT/LoRa/LoRa-STM32WL-DevKit/open-source-hardware), no custom wiring required.
+ - Print an enclosure with a [Stevenson screen](https://en.wikipedia.org/wiki/Stevenson_screenhttps://en.wikipedia.org/wiki/Stevenson_screen).
