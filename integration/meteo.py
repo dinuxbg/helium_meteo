@@ -94,7 +94,7 @@ class Meteo():
                 int(frequency_hZ),
                 self.get_hotspot_id(rec['metadata']['gateway_name'], float(rec['metadata']['gateway_lat']), float(rec['metadata']['gateway_long'])),
                 float(rec['rssi']),
-                float(rec['snr']))
+                float(rec['snr'] if 'snr' in rec else -1000000))
         cur = self.conn.cursor()
         cur.execute(sql, vals)
         self.conn.commit()
