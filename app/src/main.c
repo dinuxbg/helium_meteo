@@ -92,9 +92,7 @@ enum lorawan_state_e {
 	JOINED,
 };
 
-/* Event FIFO */
-
-K_FIFO_DEFINE(evt_fifo);
+/* Event queue. */
 
 enum evt_t {
 	EV_TIMER,
@@ -103,70 +101,10 @@ enum evt_t {
 };
 
 struct app_evt_t {
-	sys_snode_t node;
 	enum evt_t event_type;
 };
 
-#define FIFO_ELEM_MIN_SZ        sizeof(struct app_evt_t)
-#define FIFO_ELEM_MAX_SZ        sizeof(struct app_evt_t)
-#define FIFO_ELEM_COUNT         10
-#define FIFO_ELEM_ALIGN         sizeof(unsigned int)
-
-K_HEAP_DEFINE(event_elem_pool, FIFO_ELEM_MAX_SZ * FIFO_ELEM_COUNT + 256);
-
-static inline void app_evt_free(struct app_evt_t *ev)
-{
-	k_heap_free(&event_elem_pool, ev);
-}
-
-static inline void app_evt_put(struct app_evt_t *ev)
-{
-	k_fifo_put(&evt_fifo, ev);
-}
-
-static inline struct app_evt_t *app_evt_get(void)
-{
-	return k_fifo_get(&evt_fifo, K_NO_WAIT);
-}
-
-static inline void app_evt_flush(void)
-{
-	struct app_evt_t *ev;
-
-	do {
-		ev = app_evt_get();
-		if (ev) {
-			app_evt_free(ev);
-		}
-	} while (ev != NULL);
-}
-
-static inline struct app_evt_t *app_evt_alloc(void)
-{
-	struct app_evt_t *ev;
-
-	ev = k_heap_alloc(&event_elem_pool,
-			  sizeof(struct app_evt_t),
-			  K_NO_WAIT);
-	if (ev == NULL) {
-		LOG_ERR("APP event allocation failed!");
-		app_evt_flush();
-
-		ev = k_heap_alloc(&event_elem_pool,
-				  sizeof(struct app_evt_t),
-				  K_NO_WAIT);
-		if (ev == NULL) {
-			LOG_ERR("APP event memory corrupted.");
-			__ASSERT_NO_MSG(0);
-			return NULL;
-		}
-		return NULL;
-	}
-
-	return ev;
-}
-
-static K_SEM_DEFINE(evt_sem, 0, 1);	/* starts off "not available" */
+K_MSGQ_DEFINE(event_msgq, sizeof(struct app_evt_t), 10, 1);
 
 
 void update_send_timer(struct s_helium_meteo_ctx *ctx)
@@ -183,27 +121,29 @@ void update_send_timer(struct s_helium_meteo_ctx *ctx)
 
 static void send_timer_handler(struct k_timer *timer)
 {
-	struct app_evt_t *ev;
+	struct app_evt_t ev;
 
 	LOG_INF("Timer handler");
 
-	ev = app_evt_alloc();
-	ev->event_type = EV_TIMER;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
+	ev.event_type = EV_TIMER;
+	while (k_msgq_put(&event_msgq, &ev, K_NO_WAIT) != 0) {
+		/* message queue is full: purge old data & try again */
+		k_msgq_purge(&event_msgq);
+	}
 }
 
 void user_button_pressed(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
 {
-	struct app_evt_t *ev;
+	struct app_evt_t ev;
 
 	LOG_INF("Button handler");
 
-	ev = app_evt_alloc();
-	ev->event_type = EV_BUTTON;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
+	ev.event_type = EV_BUTTON;
+	while (k_msgq_put(&event_msgq, &ev, K_NO_WAIT) != 0) {
+		/* message queue is full: purge old data & try again */
+		k_msgq_purge(&event_msgq);
+	}
 }
 
 
@@ -272,9 +212,6 @@ static void dl_callback(uint8_t port, uint8_t flags, int16_t rssi, int8_t snr, u
 	LOG_INF("Port %d, Flags %x, RSSI %ddB, SNR %ddBm", port, flags, rssi, snr);
 	if (data) {
 		LOG_HEXDUMP_INF(data, len, "Payload: ");
-#if IS_ENABLED(CONFIG_SHELL)
-		dl_shell_cmd_exec(len, data);
-#endif
 	}
 }
 
@@ -475,7 +412,7 @@ void init_timers(struct s_helium_meteo_ctx *ctx)
 
 void send_event(struct s_helium_meteo_ctx *ctx)
 {
-	struct app_evt_t *ev;
+	struct app_evt_t ev;
 
 	if (!lorawan_status.joined) {
 		LOG_WRN("Not joined");
@@ -487,10 +424,11 @@ void send_event(struct s_helium_meteo_ctx *ctx)
 		return;
 	}
 
-	ev = app_evt_alloc();
-	ev->event_type = EV_SEND_DATA;
-	app_evt_put(ev);
-	k_sem_give(&evt_sem);
+	ev.event_type = EV_SEND_DATA;
+	while (k_msgq_put(&event_msgq, &ev, K_NO_WAIT) != 0) {
+		/* message queue is full: purge old data & try again */
+		k_msgq_purge(&event_msgq);
+	}
 }
 
 void lora_send_msg(struct s_helium_meteo_ctx *ctx)
@@ -625,7 +563,6 @@ void app_evt_handler(struct app_evt_t *ev, struct s_helium_meteo_ctx *ctx)
 int main(void)
 {
 	struct s_helium_meteo_ctx *ctx = &g_ctx;
-	struct app_evt_t *ev;
 	int ret;
 
 	ret = init_leds();
@@ -679,14 +616,12 @@ int main(void)
 	}
 
 	while (true) {
+		struct app_evt_t ev;
+
 		LOG_INF("Waiting for events...");
 
-		k_sem_take(&evt_sem, K_FOREVER);
-
-		while ((ev = app_evt_get()) != NULL) {
-			app_evt_handler(ev, ctx);
-			app_evt_free(ev);
-		}
+		k_msgq_get(&event_msgq, &ev, K_FOREVER);
+		app_evt_handler(&ev, ctx);
 	}
 
 fail:
