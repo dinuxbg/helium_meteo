@@ -107,7 +107,7 @@ struct app_evt_t {
 K_MSGQ_DEFINE(event_msgq, sizeof(struct app_evt_t), 10, 1);
 
 
-void update_send_timer(struct s_helium_meteo_ctx *ctx)
+static void update_send_timer(struct s_helium_meteo_ctx *ctx)
 {
 	uint32_t time = lorawan_config.send_repeat_time;
 
@@ -132,7 +132,7 @@ static void send_timer_handler(struct k_timer *timer)
 	}
 }
 
-void user_button_pressed(const struct device *dev, struct gpio_callback *cb,
+static void user_button_pressed(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
 {
 	struct app_evt_t ev;
@@ -147,7 +147,7 @@ void user_button_pressed(const struct device *dev, struct gpio_callback *cb,
 }
 
 
-int init_buttons(void)
+static int init_buttons(void)
 {
 	int err;
 
@@ -175,7 +175,7 @@ int init_buttons(void)
 	return err;
 }
 
-int init_leds(void)
+static int init_leds(void)
 {
 	int err = 0;
 
@@ -199,7 +199,7 @@ int init_leds(void)
 	return err;
 }
 
-void led_enable(const struct gpio_dt_spec *led, int enable)
+static void led_enable(const struct gpio_dt_spec *led, int enable)
 {
 	if (led->port) {
 		gpio_pin_set_dt(led, enable);
@@ -215,7 +215,7 @@ static void dl_callback(uint8_t port, uint8_t flags, int16_t rssi, int8_t snr, u
 	}
 }
 
-struct lorawan_downlink_cb downlink_cb = {
+static struct lorawan_downlink_cb downlink_cb = {
 	.port = LW_RECV_PORT_ANY,
 	.cb = dl_callback
 };
@@ -262,7 +262,7 @@ static const char *lorawan_state_str(enum lorawan_state_e state)
 	return "UNKNOWN";
 }
 
-void lorawan_state(struct s_helium_meteo_ctx *ctx, enum lorawan_state_e state)
+static void lorawan_state(struct s_helium_meteo_ctx *ctx, enum lorawan_state_e state)
 {
 	uint32_t join_try_interval_sec = lorawan_config.join_try_interval;
 
@@ -307,7 +307,7 @@ static void lora_join_timer_handler(struct k_timer *timer)
 	}
 }
 
-int join_lora(struct s_helium_meteo_ctx *ctx)
+static int join_lora(struct s_helium_meteo_ctx *ctx)
 {
 	struct pm_policy_latency_request req;
 	struct lorawan_join_config join_cfg;
@@ -365,7 +365,7 @@ static void lora_join_thread(struct s_helium_meteo_ctx *ctx)
 	}
 }
 
-int init_lora(struct s_helium_meteo_ctx *ctx)
+static int init_lora(struct s_helium_meteo_ctx *ctx)
 {
 	const struct device *lora_dev;
 	int ret;
@@ -402,7 +402,7 @@ int init_lora(struct s_helium_meteo_ctx *ctx)
 	return 0;
 }
 
-void init_timers(struct s_helium_meteo_ctx *ctx)
+static void init_timers(struct s_helium_meteo_ctx *ctx)
 {
 	k_timer_init(&ctx->send_timer, send_timer_handler, NULL);
 	k_timer_init(&ctx->lora_join_timer, lora_join_timer_handler, NULL);
@@ -410,7 +410,7 @@ void init_timers(struct s_helium_meteo_ctx *ctx)
 	update_send_timer(ctx);
 }
 
-void send_event(struct s_helium_meteo_ctx *ctx)
+static void send_event(struct s_helium_meteo_ctx *ctx)
 {
 	struct app_evt_t ev;
 
@@ -431,7 +431,7 @@ void send_event(struct s_helium_meteo_ctx *ctx)
 	}
 }
 
-void lora_send_msg(struct s_helium_meteo_ctx *ctx)
+static void lora_send_msg(struct s_helium_meteo_ctx *ctx)
 {
 	struct pm_policy_latency_request req;
 	uint8_t msg_type = lorawan_config.confirmed_msg;
@@ -518,7 +518,7 @@ void lora_send_msg(struct s_helium_meteo_ctx *ctx)
 }
 
 #if IS_ENABLED(CONFIG_SHELL)
-void shell_cb(enum shell_cmd_event event, void *data) {
+static void shell_cb(enum shell_cmd_event event, void *data) {
 	struct s_helium_meteo_ctx *ctx = (struct s_helium_meteo_ctx *)data;
 
 	switch (event) {
@@ -536,7 +536,7 @@ void shell_cb(enum shell_cmd_event event, void *data) {
 }
 #endif
 
-void app_evt_handler(struct app_evt_t *ev, struct s_helium_meteo_ctx *ctx)
+static void app_evt_handler(struct app_evt_t *ev, struct s_helium_meteo_ctx *ctx)
 {
 	switch (ev->event_type) {
 	case EV_TIMER:

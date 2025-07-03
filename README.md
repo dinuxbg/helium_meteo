@@ -51,6 +51,12 @@ Once you have built the application you can flash it by running:
 west flash
 ```
 
+Or, alternatively you may flash with `pyocd`:
+
+```shell
+pyocd flash -e sector -a 0x8000000 -t stm32wle5ccux  -O cmsis_dap.limit_packets=1 build/zephyr/zephyr.hex
+```
+
 ### Serial terminal
 
 Hook a serial UART to LPUSART1. You would get access to a shell running on the device, where you can setup the Helium/LoRaWan keys and tweak other settings.
