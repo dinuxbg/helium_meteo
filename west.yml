@@ -14,10 +14,10 @@ manifest:
   projects:
     - name: zephyr
       remote: dinuxbg
-      revision: stm32_i2c_pm_fix
+      revision: stm32_i2c_pm_fix-20250702
       import:
         name-allowlist:
           - hal_stm32
-          - cmsis
+          - cmsis_6
           - tinycrypt
           - loramac-node

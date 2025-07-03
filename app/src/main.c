@@ -266,11 +266,10 @@ void led_enable(const struct gpio_dt_spec *led, int enable)
 	}
 }
 
-static void dl_callback(uint8_t port, bool data_pending,
-			int16_t rssi, int8_t snr,
-			uint8_t len, const uint8_t *data)
+static void dl_callback(uint8_t port, uint8_t flags, int16_t rssi, int8_t snr, uint8_t len,
+			const uint8_t *data)
 {
-	LOG_INF("Port %d, Pending %d, RSSI %ddB, SNR %ddBm", port, data_pending, rssi, snr);
+	LOG_INF("Port %d, Flags %x, RSSI %ddB, SNR %ddBm", port, flags, rssi, snr);
 	if (data) {
 		LOG_HEXDUMP_INF(data, len, "Payload: ");
 #if IS_ENABLED(CONFIG_SHELL)
